@@ -380,9 +380,13 @@ pub const Zld = struct {
         const sectname = sect.sectName();
         const res: ?u8 = blk: {
             if (mem.eql(u8, "__LLVM", segname)) {
-                log.debug("TODO LLVM section: type 0x{x}, name '{s},{s}'", .{
+                log.warn("TODO LLVM section: type 0x{x}, name '{s},{s}'", .{
                     sect.flags, segname, sectname,
                 });
+                break :blk null;
+            }
+            if (mem.eql(u8, "__TEXT", segname) and mem.eql(u8, "__eh_frame", sectname)) {
+                // TODO is OK to ignore __eh_frame if we will only parse __compact_unwind instead?
                 break :blk null;
             }
 
@@ -399,12 +403,6 @@ pub const Zld = struct {
             }
 
             if (sect.isDebug()) {
-                // TODO debug attributes
-                if (mem.eql(u8, "__LD", segname) and mem.eql(u8, "__compact_unwind", sectname)) {
-                    log.debug("TODO compact unwind section: type 0x{x}, name '{s},{s}'", .{
-                        sect.flags, segname, sectname,
-                    });
-                }
                 break :blk null;
             }
 
@@ -456,13 +454,6 @@ pub const Zld = struct {
                     );
                 },
                 macho.S_COALESCED => {
-                    // TODO unwind info
-                    if (mem.eql(u8, "__TEXT", segname) and mem.eql(u8, "__eh_frame", sectname)) {
-                        log.debug("TODO eh frame section: type 0x{x}, name '{s},{s}'", .{
-                            sect.flags, segname, sectname,
-                        });
-                        break :blk null;
-                    }
                     break :blk self.getSectionByName(segname, sectname) orelse try self.initSection(
                         segname,
                         sectname,
@@ -579,11 +570,10 @@ pub const Zld = struct {
         const sym = self.getSymbolPtr(.{ .sym_index = sym_index });
         sym.n_type = macho.N_SECT;
 
-        const sect_id = (try self.getOutputSection(.{
-            .segname = makeStaticString("__DATA"),
-            .sectname = makeStaticString("__thread_ptrs"),
+        const sect_id = self.getSectionByName("__DATA", "__thread_ptrs") orelse
+            try self.initSection("__DATA", "__thread_ptrs", .{
             .flags = macho.S_THREAD_LOCAL_VARIABLE_POINTERS,
-        })).?;
+        });
         sym.n_sect = sect_id + 1;
 
         self.addAtomToSection(atom_index);
@@ -907,11 +897,10 @@ pub const Zld = struct {
             // text blocks for each tentative definition.
             const size = sym.n_value;
             const alignment = (sym.n_desc >> 8) & 0x0f;
-            const n_sect = (try self.getOutputSection(.{
-                .segname = makeStaticString("__DATA"),
-                .sectname = makeStaticString("__bss"),
+            const n_sect = self.getSectionByName("__DATA", "__bss") orelse
+                try self.initSection("__DATA", "__bss", .{
                 .flags = macho.S_ZEROFILL,
-            })).? + 1;
+            }) + 1;
 
             sym.* = .{
                 .n_strx = sym.n_strx,

@@ -30,6 +30,7 @@ mtime: u64,
 contents: []align(@alignOf(u64)) const u8,
 
 header: macho.mach_header_64 = undefined,
+compact_unwind_sect: ?macho.section_64 = null,
 
 /// Symtab and strtab might not exist for empty object files so we use an optional
 /// to signal this.
@@ -107,6 +108,15 @@ pub fn parse(self: *Object, allocator: Allocator, cpu_arch: std.Target.Cpu.Arch)
     };
     while (it.next()) |cmd| {
         switch (cmd.cmd()) {
+            .SEGMENT_64 => {
+                const sections = cmd.getSections();
+                for (sections) |sect| {
+                    if (mem.eql(u8, sect.segName(), "__LD") and mem.eql(u8, sect.sectName(), "__compact_unwind")) {
+                        assert(self.compact_unwind_sect == null);
+                        self.compact_unwind_sect = sect;
+                    }
+                }
+            },
             .SYMTAB => {
                 const symtab = cmd.cast(macho.symtab_command).?;
                 self.in_symtab = @ptrCast(
